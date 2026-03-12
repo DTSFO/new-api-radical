@@ -59,6 +59,14 @@ function formatTokens(v) {
   return `${sign}${normalized}`;
 }
 
+function percentileNearestRank(values, p) {
+  const arr = (values || []).filter((v) => Number.isFinite(v)).slice().sort((a, b) => a - b);
+  if (arr.length === 0) return 0;
+  const pp = Math.max(0, Math.min(1, Number(p) || 0));
+  const idx = Math.floor((arr.length - 1) * pp);
+  return Number(arr[idx]) || 0;
+}
+
 function HealthCell({ cell, isLatest }) {
   const rate = Number(cell?.success_rate) || 0;
   const isFilled = cell?.is_filled;
@@ -325,15 +333,22 @@ export default function ModelHealthPublicPage() {
       let modelTotalSlices = 0;
       let modelTotalTokens = 0;
 
+      const hourlyTokens = hourStarts.map((ts) => Number(hourMap?.get(ts)?.success_tokens) || 0);
+      const p10Tokens = percentileNearestRank(
+        hourlyTokens.filter((t) => t > 0),
+        0.1
+      );
+
       for (const ts of hourStarts) {
         const stat = hourMap?.get(ts);
-        if (stat && Number(stat.total_slices) > 0) {
+        const hourTokens = Number(stat?.success_tokens) || 0;
+        const hasData = stat && Number(stat.total_slices) > 0;
+        const isLowTraffic = p10Tokens > 0 && hourTokens < p10Tokens;
+        if (hasData && !isLowTraffic) {
           modelTotalSuccess += Number(stat.success_slices) || 0;
           modelTotalSlices += Number(stat.total_slices) || 0;
         }
-        if (stat) {
-          modelTotalTokens += Number(stat.success_tokens) || 0;
-        }
+        modelTotalTokens += hourTokens;
       }
 
       const avgRate = modelTotalSlices > 0 ? modelTotalSuccess / modelTotalSlices : 0;
@@ -348,7 +363,10 @@ export default function ModelHealthPublicPage() {
 
       const hourlyData = hourStarts.map((ts) => {
         const stat = hourMap?.get(ts);
-        if (stat && Number(stat.total_slices) > 0) {
+        const hourTokens = Number(stat?.success_tokens) || 0;
+        const hasData = stat && Number(stat.total_slices) > 0;
+        const isLowTraffic = p10Tokens > 0 && hourTokens < p10Tokens;
+        if (hasData && !isLowTraffic) {
           return stat;
         }
         return {
@@ -357,7 +375,7 @@ export default function ModelHealthPublicPage() {
           success_slices: 0,
           total_slices: 0,
           success_rate: avgRate,
-          success_tokens: Number(stat?.success_tokens) || 0,
+          success_tokens: hourTokens,
           is_filled: true,
         };
       });
@@ -408,7 +426,7 @@ export default function ModelHealthPublicPage() {
         <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
           <div>
             <p className='text-sm sm:text-base text-gray-500 mt-2'>
-              最近 24 小时各模型运行状态一览
+              最近 24 小时各模型运行状态一览，监测所有请求（包括格式不正确导致的错误）
             </p>
           </div>
         </div>

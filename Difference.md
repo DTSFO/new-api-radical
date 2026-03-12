@@ -31,6 +31,10 @@
     - 数据来源：复用小时聚合表 `quota_data` 的 `token_used`（写入点见 [`model.LogQuotaData()`](model/usedata.go:58)），按 `model_name + created_at(整点)` 聚合得到每小时成功 token。
     - 合并位置：在公共 API 内额外查询 `quota_data` 并把结果合并进返回行字段 `success_tokens`（实现见 [`controller.GetPublicModelsHealthHourlyLast24hAPI()`](controller/model_health.go:156)）。
     - 说明：成功率仍完全来自健康度切片表 `model_health_slice_5m`（`success_slices/total_slices/success_rate` 逻辑不变），token 统计仅用于展示与排序。
+  - 前端展示与“低流量视作无数据”策略（公共页面 `/model-health`）：
+    - 文案提示：页面“最近 24 小时各模型运行状态一览”后追加“监测所有请求（包括格式不正确导致的错误）”。
+    - 报表过滤：按每模型最近 24 小时的每小时 `success_tokens` 计算 P10（仅对 `>0` token 的小时取分位数），若某小时 `success_tokens < P10` 则该小时视作“无数据”（UI 会使用该模型的平均成功率进行填充渲染）。
+    - 平均值/总体成功率：模型平均成功率与整体成功率的分子分母（`success_slices/total_slices`）均忽略这些被判定为“无数据”的低流量小时。
   - 路由与鉴权：
     - 管理员接口 `/api/model_health/hourly`：在 [`router.SetApiRouter()`](router/api-router.go:11) 中挂载并强制 [`middleware.AdminAuth()`](router/api-router.go:276)（满足“非管理员隐藏可自定义模型和时间的查询（在控制台）”）。
     - 公共接口 `/api/public/model_health/hourly_last24h`：在 [`router.SetApiRouter()`](router/api-router.go:11) 中挂载且无鉴权（满足“新页面所有用户即使非登录也可查看”所需的数据源）。
