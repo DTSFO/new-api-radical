@@ -8,10 +8,10 @@ import (
 
 func TestAdaptiveRetryDelay_AdjustAndClamp(t *testing.T) {
 	t.Cleanup(func() {
-		SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50})
+		SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 	})
 
-	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50})
+	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 
 	if got := GetAdaptiveRetryDelay(); got != 0 {
 		t.Fatalf("expected initial delay 0, got %s", got)
@@ -48,20 +48,20 @@ func TestAdaptiveRetryDelay_AdjustAndClamp(t *testing.T) {
 }
 
 func TestAdaptiveRetryDelay_DisabledResets(t *testing.T) {
-	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50})
+	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 	AdjustAdaptiveRetryDelay(99)
 	if GetAdaptiveRetryDelay() == 0 {
 		t.Fatalf("expected delay > 0 after adjust")
 	}
 
-	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50})
+	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 	if got := GetAdaptiveRetryDelay(); got != 0 {
 		t.Fatalf("expected delay 0 when disabled, got %s", got)
 	}
 }
 
 func TestAdaptiveRetryDelay_InvalidThresholdFallback(t *testing.T) {
-	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 999})
+	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 999, Step: 10 * time.Millisecond, Max: time.Second})
 	cfg := GetAdaptiveRetryDelayConfig()
 	if cfg.CPUThreshold != 50 {
 		t.Fatalf("expected threshold fallback to 50, got %d", cfg.CPUThreshold)
@@ -70,9 +70,9 @@ func TestAdaptiveRetryDelay_InvalidThresholdFallback(t *testing.T) {
 
 func TestSleepAdaptiveRetryDelay_ContextCancel(t *testing.T) {
 	t.Cleanup(func() {
-		SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50})
+		SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: false, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 	})
-	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50})
+	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{Enabled: true, CPUThreshold: 50, Step: 10 * time.Millisecond, Max: time.Second})
 	AdjustAdaptiveRetryDelay(99) // 10ms
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -81,4 +81,3 @@ func TestSleepAdaptiveRetryDelay_ContextCancel(t *testing.T) {
 		t.Fatalf("expected sleep to abort on canceled context")
 	}
 }
-

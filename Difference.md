@@ -364,3 +364,5 @@
 - 配置（环境变量）：
   - `RETRY_DELAY_ADAPTIVE_ENABLED`（默认 `false`）
   - `RETRY_DELAY_CPU_THRESHOLD`（默认 `50`，取值 0~100）
+  - `RETRY_DELAY_STEP_MS`（默认 `10`，每次调整的步进毫秒数）
+  - `RETRY_DELAY_MAX_MS`（默认 `1000`，最大重试间隔毫秒数）

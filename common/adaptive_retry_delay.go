@@ -12,12 +12,9 @@ import (
 type AdaptiveRetryDelayConfig struct {
 	Enabled      bool
 	CPUThreshold int // 0-100 (%)
+	Step         time.Duration
+	Max          time.Duration
 }
-
-const (
-	adaptiveRetryDelayStep = 10 * time.Millisecond
-	adaptiveRetryDelayMax  = 1 * time.Second
-)
 
 var adaptiveRetryDelayConfig atomic.Value // AdaptiveRetryDelayConfig
 var adaptiveRetryDelayNS atomic.Int64     // current delay in nanoseconds
@@ -26,6 +23,8 @@ func init() {
 	adaptiveRetryDelayConfig.Store(AdaptiveRetryDelayConfig{
 		Enabled:      false,
 		CPUThreshold: 50,
+		Step:         10 * time.Millisecond,
+		Max:          1 * time.Second,
 	})
 	adaptiveRetryDelayNS.Store(0)
 }
@@ -38,6 +37,21 @@ func SetAdaptiveRetryDelayConfig(config AdaptiveRetryDelayConfig) {
 	if config.CPUThreshold < 0 || config.CPUThreshold > 100 {
 		SysError(fmt.Sprintf("invalid RETRY_DELAY_CPU_THRESHOLD=%d, fallback to 50", config.CPUThreshold))
 		config.CPUThreshold = 50
+	}
+	if config.Step <= 0 {
+		SysError(fmt.Sprintf("invalid RETRY_DELAY_STEP_MS=%s, fallback to 10ms", config.Step))
+		config.Step = 10 * time.Millisecond
+	}
+	if config.Max <= 0 {
+		SysError(fmt.Sprintf("invalid RETRY_DELAY_MAX_MS=%s, fallback to 1s", config.Max))
+		config.Max = 1 * time.Second
+	}
+	if config.Max < config.Step {
+		SysError(fmt.Sprintf("invalid retry delay config: max(%s) < step(%s), fallback to max=1s", config.Max, config.Step))
+		config.Max = 1 * time.Second
+		if config.Max < config.Step {
+			config.Max = config.Step
+		}
 	}
 	adaptiveRetryDelayConfig.Store(config)
 	if !config.Enabled {
@@ -69,8 +83,8 @@ func AdjustAdaptiveRetryDelay(cpuUsage float64) {
 		return
 	}
 
-	stepNS := int64(adaptiveRetryDelayStep)
-	maxNS := int64(adaptiveRetryDelayMax)
+	stepNS := int64(config.Step)
+	maxNS := int64(config.Max)
 
 	current := adaptiveRetryDelayNS.Load()
 	if cpuUsage > float64(config.CPUThreshold) {
@@ -104,4 +118,3 @@ func SleepAdaptiveRetryDelay(ctx context.Context) bool {
 		return false
 	}
 }
-

@@ -102,9 +102,13 @@ func InitEnv() {
 	// Adaptive retry delay (CPU-driven, env controlled)
 	adaptiveEnabled := GetEnvOrDefaultBool("RETRY_DELAY_ADAPTIVE_ENABLED", false)
 	adaptiveCPUThreshold := GetEnvOrDefault("RETRY_DELAY_CPU_THRESHOLD", 50)
+	adaptiveStepMS := GetEnvOrDefault("RETRY_DELAY_STEP_MS", 10)
+	adaptiveMaxMS := GetEnvOrDefault("RETRY_DELAY_MAX_MS", 1000)
 	SetAdaptiveRetryDelayConfig(AdaptiveRetryDelayConfig{
 		Enabled:      adaptiveEnabled,
 		CPUThreshold: adaptiveCPUThreshold,
+		Step:         time.Duration(adaptiveStepMS) * time.Millisecond,
+		Max:          time.Duration(adaptiveMaxMS) * time.Millisecond,
 	})
 
 	// Initialize variables with GetEnvOrDefault
