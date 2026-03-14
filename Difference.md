@@ -86,6 +86,7 @@
     - 追加 raw chunk：[`(*recentCallsCache).AppendStreamChunkByContext()`](service/recent_calls_cache.go:283)，单 chunk 按 [`DefaultMaxStreamChunkBytes`](service/recent_calls_cache.go:27) 截断，总量按 [`DefaultMaxStreamTotalBytes`](service/recent_calls_cache.go:28) 限制（超限标记 `chunks_truncated`）
     - 写入聚合 assistant 文本：[`(*recentCallsCache).FinalizeStreamAggregatedTextByContext()`](service/recent_calls_cache.go:323)（OpenAI 写入见 [`FinalizeStreamAggregatedTextByContext()`](relay/channel/openai/relay-openai.go:190)，Gemini 写入见 [`FinalizeStreamAggregatedTextByContext()`](relay/channel/gemini/relay-gemini.go:1119)）
   - 错误记录：[`(*recentCallsCache).UpsertErrorByContext()`](service/recent_calls_cache.go:196)，在 [`processChannelError()`](controller/relay.go:357) 里写入（见 [`UpsertErrorByContext()`](controller/relay.go:360)），包含 `message/type/code/status`。
+  - 上游错误响应体读取上限：当上游返回非 200 并进入 [`service.RelayErrorHandler()`](service/error.go:86) 时，仅读取最多 1MiB 的 error body（超出追加 `...[truncated]`），避免上游回显大 payload 导致日志/IO 压力。
 
 - 后端：管理端查询 API（debug 路由）
   - 列表：[`controller.GetRecentCalls()`](controller/debug_recent_calls.go:11) 支持 `limit` 与 `before_id`，数据来自 [`(*recentCallsCache).List()`](service/recent_calls_cache.go:383)（按 id 倒序）。
