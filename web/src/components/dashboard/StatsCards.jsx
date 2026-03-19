@@ -32,37 +32,6 @@ const StatsCards = ({
 }) => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const cardBackgroundColors = [
-    'var(--semi-color-primary-hover)',
-    'var(--semi-color-success)',
-    'var(--semi-color-primary)',
-    'var(--semi-color-success-active)',
-  ];
-
-  const renderValueSkeleton = () => (
-    <Skeleton.Title
-      active
-      style={{
-        width: 65,
-        height: 24,
-        marginTop: 4,
-      }}
-    />
-  );
-
-  const renderTrendSkeleton = () => (
-    <div className='w-24 h-10 flex items-center'>
-      <Skeleton.Title
-        active
-        style={{
-          width: 96,
-          height: 32,
-          borderRadius: 12,
-        }}
-      />
-    </div>
-  );
-
   return (
     <div className='mb-4'>
       <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
@@ -70,13 +39,7 @@ const StatsCards = ({
           <Card
             key={idx}
             {...CARD_PROPS}
-            className='border-0 !rounded-2xl w-full'
-            style={{
-              ...CARD_PROPS?.style,
-              background:
-                cardBackgroundColors[idx] || 'var(--semi-color-bg-1)',
-              backgroundImage: 'none',
-            }}
+            className={`${group.color} border-0 !rounded-2xl w-full`}
             title={group.title}
           >
             <div className='space-y-4'>
@@ -96,8 +59,24 @@ const StatsCards = ({
                     </Avatar>
                     <div>
                       <div className='text-xs text-gray-500'>{item.title}</div>
-                      <div className='text-lg font-semibold min-h-[28px] flex items-center'>
-                        {loading ? renderValueSkeleton() : item.value}
+                      <div className='text-lg font-semibold'>
+                        <Skeleton
+                          loading={loading}
+                          active
+                          placeholder={
+                            <Skeleton.Paragraph
+                              active
+                              rows={1}
+                              style={{
+                                width: '65px',
+                                height: '24px',
+                                marginTop: '4px',
+                              }}
+                            />
+                          }
+                        >
+                          {item.value}
+                        </Skeleton>
                       </div>
                     </div>
                   </div>
@@ -113,11 +92,9 @@ const StatsCards = ({
                     >
                       {t('充值')}
                     </Tag>
-                  ) : loading ? (
-                    renderTrendSkeleton()
                   ) : (
-                    item.trendData &&
-                    item.trendData.length > 0 && (
+                    (loading ||
+                      (item.trendData && item.trendData.length > 0)) && (
                       <div className='w-24 h-10'>
                         <VChart
                           spec={getTrendSpec(item.trendData, item.trendColor)}
