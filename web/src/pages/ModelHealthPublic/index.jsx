@@ -478,7 +478,7 @@ export default function ModelHealthPublicPage() {
               <StatCardSkeleton
                 icon={<IconTickCircle className='text-white' size='large' />}
                 title='监控模型数'
-                bgGradient='var(--semi-color-primary-hover)'
+                bgGradient='var(--semi-color-primary)'
                 iconBg='rgba(255,255,255,0.25)'
                 valueWidth={72}
               />
@@ -492,14 +492,14 @@ export default function ModelHealthPublicPage() {
               <StatCardSkeleton
                 icon={<IconTickCircle className='text-white' size='large' />}
                 title='Token总数'
-                bgGradient='var(--semi-color-primary)'
+                bgGradient='var(--semi-color-secondary)'
                 iconBg='rgba(255,255,255,0.25)'
                 valueWidth={120}
               />
               <StatCardSkeleton
                 icon={<IconTickCircle className='text-white' size='large' />}
                 title='优良模型'
-                bgGradient='var(--semi-color-success-active)'
+                bgGradient='var(--semi-color-success)'
                 iconBg='rgba(255,255,255,0.25)'
                 valueWidth={72}
               />
@@ -512,7 +512,7 @@ export default function ModelHealthPublicPage() {
                 value={stats.totalModels}
                 subtitle={`${stats.healthyModels} 个健康`}
                 color='#4dd0e1'
-                bgGradient='var(--semi-color-primary-hover)'
+                bgGradient='var(--semi-color-primary)'
                 iconBg='rgba(255,255,255,0.25)'
               />
               <StatCard
@@ -530,7 +530,7 @@ export default function ModelHealthPublicPage() {
                 value={formatTokens(stats.totalSuccessTokens)}
                 subtitle='过去24小时'
                 color='#60a5fa'
-                bgGradient='var(--semi-color-primary)'
+                bgGradient='var(--semi-color-secondary)'
                 iconBg='rgba(255,255,255,0.25)'
               />
               <StatCard
@@ -539,7 +539,7 @@ export default function ModelHealthPublicPage() {
                 value={stats.healthyModels}
                 subtitle='成功率 ≥80%'
                 color='#0f766e'
-                bgGradient='var(--semi-color-success-active)'
+                bgGradient='var(--semi-color-success)'
                 iconBg='rgba(255,255,255,0.25)'
               />
             </>
