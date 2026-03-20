@@ -94,7 +94,7 @@ func (c *ClaudeMediaMessage) SetContent(content any) {
 }
 
 func (c *ClaudeMediaMessage) ParseMediaContent() []ClaudeMediaMessage {
-	mediaContent, _ := common.Any2Type[[]ClaudeMediaMessage](c.Content)
+	mediaContent, _ := parseClaudeMediaMessagesFast(c.Content)
 	return mediaContent
 }
 
@@ -153,7 +153,7 @@ func (c *ClaudeMessage) SetContent(content any) {
 }
 
 func (c *ClaudeMessage) ParseContent() ([]ClaudeMediaMessage, error) {
-	return common.Any2Type[[]ClaudeMediaMessage](c.Content)
+	return parseClaudeMediaMessagesFast(c.Content)
 }
 
 type Tool struct {
@@ -215,7 +215,170 @@ type ClaudeRequest struct {
 	Metadata          json.RawMessage `json:"metadata,omitempty"`
 	// ServiceTier specifies upstream service level and may affect billing.
 	// This field is filtered by default and can be enabled via channel setting allow_service_tier.
-	ServiceTier string `json:"service_tier,omitempty"`
+	ServiceTier      string            `json:"service_tier,omitempty"`
+	toolNameByCallID map[string]string `json:"-"`
+}
+
+func claudeStringFromAny(data any) string {
+	if s, ok := data.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func claudeStringPointerFromMap(data map[string]any, key string) *string {
+	s, ok := data[key].(string)
+	if !ok {
+		return nil
+	}
+	return &s
+}
+
+func parseClaudeMessageSourceFast(data any) (*ClaudeMessageSource, error) {
+	switch v := data.(type) {
+	case nil:
+		return nil, nil
+	case ClaudeMessageSource:
+		return &v, nil
+	case *ClaudeMessageSource:
+		return v, nil
+	case map[string]any:
+		return &ClaudeMessageSource{
+			Type:      claudeStringFromAny(v["type"]),
+			MediaType: claudeStringFromAny(v["media_type"]),
+			Data:      v["data"],
+			Url:       claudeStringFromAny(v["url"]),
+		}, nil
+	default:
+		res, err := common.Any2Type[ClaudeMessageSource](data)
+		if err != nil {
+			return nil, err
+		}
+		return &res, nil
+	}
+}
+
+func parseClaudeUsageFast(data any) (*ClaudeUsage, error) {
+	switch v := data.(type) {
+	case nil:
+		return nil, nil
+	case ClaudeUsage:
+		return &v, nil
+	case *ClaudeUsage:
+		return v, nil
+	default:
+		res, err := common.Any2Type[ClaudeUsage](data)
+		if err != nil {
+			return nil, err
+		}
+		return &res, nil
+	}
+}
+
+func parseClaudeRawMessageFast(data any) (json.RawMessage, error) {
+	switch v := data.(type) {
+	case nil:
+		return nil, nil
+	case json.RawMessage:
+		return v, nil
+	case []byte:
+		return json.RawMessage(v), nil
+	case string:
+		return json.RawMessage(v), nil
+	default:
+		res, err := common.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+		return json.RawMessage(res), nil
+	}
+}
+
+func parseClaudeMediaMessageItemFast(item any) (ClaudeMediaMessage, error) {
+	switch v := item.(type) {
+	case ClaudeMediaMessage:
+		return v, nil
+	case *ClaudeMediaMessage:
+		if v == nil {
+			return ClaudeMediaMessage{}, nil
+		}
+		return *v, nil
+	case map[string]any:
+		source, err := parseClaudeMessageSourceFast(v["source"])
+		if err != nil {
+			return ClaudeMediaMessage{}, err
+		}
+		usage, err := parseClaudeUsageFast(v["usage"])
+		if err != nil {
+			return ClaudeMediaMessage{}, err
+		}
+		cacheControl, err := parseClaudeRawMessageFast(v["cache_control"])
+		if err != nil {
+			return ClaudeMediaMessage{}, err
+		}
+		return ClaudeMediaMessage{
+			Type:         claudeStringFromAny(v["type"]),
+			Text:         claudeStringPointerFromMap(v, "text"),
+			Model:        claudeStringFromAny(v["model"]),
+			Source:       source,
+			Usage:        usage,
+			StopReason:   claudeStringPointerFromMap(v, "stop_reason"),
+			PartialJson:  claudeStringPointerFromMap(v, "partial_json"),
+			Role:         claudeStringFromAny(v["role"]),
+			Thinking:     claudeStringPointerFromMap(v, "thinking"),
+			Signature:    claudeStringFromAny(v["signature"]),
+			Delta:        claudeStringFromAny(v["delta"]),
+			CacheControl: cacheControl,
+			Id:           claudeStringFromAny(v["id"]),
+			Name:         claudeStringFromAny(v["name"]),
+			Input:        v["input"],
+			Content:      v["content"],
+			ToolUseId:    claudeStringFromAny(v["tool_use_id"]),
+		}, nil
+	default:
+		return common.Any2Type[ClaudeMediaMessage](item)
+	}
+}
+
+func parseClaudeMediaMessagesFast(data any) ([]ClaudeMediaMessage, error) {
+	switch v := data.(type) {
+	case nil:
+		return nil, nil
+	case []ClaudeMediaMessage:
+		return v, nil
+	case []*ClaudeMediaMessage:
+		mediaContent := make([]ClaudeMediaMessage, 0, len(v))
+		for _, item := range v {
+			if item == nil {
+				mediaContent = append(mediaContent, ClaudeMediaMessage{})
+				continue
+			}
+			mediaContent = append(mediaContent, *item)
+		}
+		return mediaContent, nil
+	case []any:
+		mediaContent := make([]ClaudeMediaMessage, 0, len(v))
+		for _, item := range v {
+			mediaMessage, err := parseClaudeMediaMessageItemFast(item)
+			if err != nil {
+				return common.Any2Type[[]ClaudeMediaMessage](data)
+			}
+			mediaContent = append(mediaContent, mediaMessage)
+		}
+		return mediaContent, nil
+	case []map[string]any:
+		mediaContent := make([]ClaudeMediaMessage, 0, len(v))
+		for _, item := range v {
+			mediaMessage, err := parseClaudeMediaMessageItemFast(item)
+			if err != nil {
+				return common.Any2Type[[]ClaudeMediaMessage](data)
+			}
+			mediaContent = append(mediaContent, mediaMessage)
+		}
+		return mediaContent, nil
+	default:
+		return common.Any2Type[[]ClaudeMediaMessage](data)
+	}
 }
 
 // createClaudeFileSource 根据数据内容创建正确类型的 FileSource
@@ -362,15 +525,33 @@ func (c *ClaudeRequest) SetModelName(modelName string) {
 }
 
 func (c *ClaudeRequest) SearchToolNameByToolCallId(toolCallId string) string {
+	if toolCallId == "" {
+		return ""
+	}
+	c.ensureToolNameIndex()
+	return c.toolNameByCallID[toolCallId]
+}
+
+func (c *ClaudeRequest) ensureToolNameIndex() {
+	if c.toolNameByCallID != nil {
+		return
+	}
+	c.toolNameByCallID = make(map[string]string)
 	for _, message := range c.Messages {
-		content, _ := message.ParseContent()
+		if message.IsStringContent() {
+			continue
+		}
+		content, err := message.ParseContent()
+		if err != nil {
+			continue
+		}
 		for _, mediaMessage := range content {
-			if mediaMessage.Id == toolCallId {
-				return mediaMessage.Name
+			if mediaMessage.Type != "tool_use" || mediaMessage.Id == "" || mediaMessage.Name == "" {
+				continue
 			}
+			c.toolNameByCallID[mediaMessage.Id] = mediaMessage.Name
 		}
 	}
-	return ""
 }
 
 // AddTool 添加工具到请求中
@@ -455,7 +636,7 @@ func (c *ClaudeRequest) SetStringSystem(system string) {
 }
 
 func (c *ClaudeRequest) ParseSystem() []ClaudeMediaMessage {
-	mediaContent, _ := common.Any2Type[[]ClaudeMediaMessage](c.System)
+	mediaContent, _ := parseClaudeMediaMessagesFast(c.System)
 	return mediaContent
 }
 
