@@ -84,7 +84,7 @@
   - 非流式上游响应：[`(*recentCallsCache).UpsertUpstreamResponseByContext()`](service/recent_calls_cache.go:218)，例如 OpenAI 非流式路径调用见 [`service.RecentCallsCache().UpsertUpstreamResponseByContext()`](relay/channel/openai/relay-openai.go:209)，记录 `status_code/headers` 并将 `body`（按 [`DefaultMaxResponseBodyBytes`](service/recent_calls_cache.go:25) 截断）写入临时文件。
   - 流式上游响应（保存 raw chunk + 聚合文本）
     - 初始化 stream：[`(*recentCallsCache).EnsureStreamByContext()`](service/recent_calls_cache.go:255)（OpenAI 流式见 [`EnsureStreamByContext()`](relay/channel/openai/relay-openai.go:114)，Gemini 流式见 [`EnsureStreamByContext()`](relay/channel/gemini/relay-gemini.go:1075)）
-    - 追加 raw chunk：[`(*recentCallsCache).AppendStreamChunkByContext()`](service/recent_calls_cache.go:283) 将 chunk 追加写入临时文件（JSONL，一行一个 JSON string），单 chunk 按 [`DefaultMaxStreamChunkBytes`](service/recent_calls_cache.go:27) 截断，总量按 [`DefaultMaxStreamTotalBytes`](service/recent_calls_cache.go:28) 限制（超限标记 `chunks_truncated`）。
+    - 追加 raw chunk：[`(*recentCallsCache).AppendStreamChunkByContext()`](service/recent_calls_cache.go:283) 将 chunk 先编码为 JSONL 行并写入 entry 级内存缓冲；默认累计到 16KiB 后再批量 append 到临时文件。单 chunk 仍按 [`DefaultMaxStreamChunkBytes`](service/recent_calls_cache.go:27) 截断，总量仍按 [`DefaultMaxStreamTotalBytes`](service/recent_calls_cache.go:28) 限制（超限标记 `chunks_truncated`）。
     - 写入聚合 assistant 文本：[`(*recentCallsCache).FinalizeStreamAggregatedTextByContext()`](service/recent_calls_cache.go:323) 将聚合文本写入临时文件；返回 API 时按需读回（OpenAI/Gemini 调用点同原实现）。
   - 错误记录：[`(*recentCallsCache).UpsertErrorByContext()`](service/recent_calls_cache.go:196)，在 [`processChannelError()`](controller/relay.go:357) 里写入（见 [`UpsertErrorByContext()`](controller/relay.go:360)），包含 `message/type/code/status`。
   - 上游错误响应体读取上限：当上游返回非 200 并进入 [`service.RelayErrorHandler()`](service/error.go:86) 时，仅读取最多 1MiB 的 error body（超出追加 `...[truncated]`），避免上游回显大 payload 导致日志/IO 压力。
@@ -409,3 +409,62 @@
     - 覆盖重复调用结果稳定；
     - 覆盖 `ParseContent` / `ParseSystem` / `ParseMediaContent` 对 `[]ClaudeMediaMessage`、`[]any{map[string]any{...}}`、`nil`、字符串内容路径的兼容性；
     - 增加基准，对比旧式全量扫描与新索引查找。
+
+15. 【已实现】流式 Flush 节流 + recent calls stream chunk 批量落盘（最小补丁）
+
+- 目标与约束
+  - 仅处理两处已确认热点：
+    - 流式 SSE 输出不再每个 chunk 无条件 `Flush`
+    - `recentCallsCache` 的 stream chunk 不再每片同步 `OpenFile/Write/Close`
+  - 保持 SSE 语义不变，不改协议，不做额外重构。
+
+- 流式 Flush 节流
+  - 修改文件：
+    - [`relay/helper/common.go`](relay/helper/common.go)
+    - [`relay/helper/stream_scanner.go`](relay/helper/stream_scanner.go)
+    - [`relay/channel/openai/helper.go`](relay/channel/openai/helper.go)
+  - 实现：
+    - 在 gin context 上增加内部 `streamFlushState`，维护：
+      - `pendingBytes`
+      - `lastFlushTime`
+    - 新增内部 helper：`maybeFlushWriter(c, force, wroteBytes)`。
+    - 普通流式 event 先写 response writer，再按阈值决定是否真正 flush：
+      - 字节阈值：8KiB
+      - 时间阈值：25ms
+    - 强制 flush 场景保持及时性：
+      - [`PingData`](relay/helper/common.go) 始终强制 flush
+      - [`Done`](relay/helper/common.go) 始终强制 flush
+      - [`StreamScannerHandler`](relay/helper/stream_scanner.go) defer 收尾时补一次 flush，避免 handler return 前残留未刷出
+    - [`StringData`](relay/helper/common.go)、[`ClaudeData`](relay/helper/common.go)、[`ClaudeChunkData`](relay/helper/common.go)、[`ResponseChunkData`](relay/helper/common.go) 已切到节流路径，不再每片直接 `FlushWriter`
+    - OpenAI->Gemini 流式转换中的两处直接 `Render+Flush` 也已改为走 [`helper.StringData`](relay/channel/openai/helper.go)，避免绕过节流层。
+
+- recent calls stream chunk 批量落盘
+  - 修改文件：
+    - [`service/recent_calls_cache.go`](service/recent_calls_cache.go)
+  - 实现：
+    - 在 `recentCallEntry` 增加 entry 级 `streamChunkBuf bytes.Buffer`
+    - [`AppendStreamChunkByContext`](service/recent_calls_cache.go) 仍保留：
+      - 单 chunk 截断逻辑
+      - 总量上限判断
+    - 但不再每片直接写文件，而是：
+      1. 将 chunk 编码为一行 JSONL
+      2. 追加到内存缓冲
+      3. 缓冲达到 16KiB 时一次性 append 到 `stream_chunks.jsonl`
+    - 新增底层批量写接口：
+      - `marshalJSONLStringLine`
+      - `appendRaw`
+      - `flushStreamChunkBuffer`
+    - 收尾刷盘位置：
+      - [`FinalizeStreamAggregatedTextByContext`](service/recent_calls_cache.go) 中写聚合文本前先 flush pending chunk buffer
+      - [`UpsertErrorByContext`](service/recent_calls_cache.go) 中也会尽量 flush，减少错误结束时丢尾巴概率
+      - [`materializeEntry`](service/recent_calls_cache.go) 读取 recent calls 前会先 flush，确保管理端查看时能看到最新 chunk
+
+- 验证
+  - 新增 [`relay/helper/common_test.go`](relay/helper/common_test.go)：
+    - 验证普通小 chunk 不会立刻 flush
+    - 验证 `PingData` 必定即时 flush
+    - 验证时间阈值到达后会触发 flush
+  - 新增 [`service/recent_calls_cache_test.go`](service/recent_calls_cache_test.go)：
+    - 验证 stream chunk 会先留在 entry 内存缓冲
+    - 验证 `FinalizeStreamAggregatedTextByContext` 会把 pending buffer 刷到 `stream_chunks.jsonl`
+    - 验证刷盘后 `Get()` 仍能正确读回 chunk 与 aggregated text

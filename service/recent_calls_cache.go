@@ -2,9 +2,9 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,6 +31,8 @@ const (
 
 	DefaultMaxStreamChunkBytes = 8 << 10   // 8KiB
 	DefaultMaxStreamTotalBytes = 256 << 10 // 256KiB
+
+	streamChunkBufferFlushBytes = 16 << 10 // 16KiB
 )
 
 type RecentCallsCacheConfig struct {
@@ -107,8 +109,9 @@ type recentCallEntry struct {
 	streamPath    string
 	streamAggPath string
 
-	streamBytes  int
-	streamInited bool
+	streamBytes    int
+	streamInited   bool
+	streamChunkBuf bytes.Buffer
 
 	mu      sync.Mutex
 	evicted bool
@@ -255,6 +258,12 @@ func (cch *recentCallsCache) UpsertErrorByContext(c *gin.Context, errMsg string,
 	defer entry.mu.Unlock()
 	if entry.evicted {
 		return
+	}
+	if err := entry.flushStreamChunkBuffer(); err != nil {
+		if entry.meta.Stream == nil {
+			entry.meta.Stream = &RecentCallUpstreamStream{}
+		}
+		entry.meta.Stream.ChunksTruncated = true
 	}
 	entry.meta.Error = &RecentCallErrorInfo{
 		Message: errMsg,
@@ -420,7 +429,24 @@ func (cch *recentCallsCache) AppendStreamChunkByContext(c *gin.Context, chunk st
 		}
 	}
 
-	if err := entry.appendJSONLString(entry.streamPath, chunk); err != nil {
+	chunkLine, err := marshalJSONLStringLine(chunk)
+	if err != nil {
+		if entry.meta.Stream == nil {
+			entry.meta.Stream = &RecentCallUpstreamStream{}
+		}
+		entry.meta.Stream.ChunksTruncated = true
+		return
+	}
+
+	if _, err := entry.streamChunkBuf.Write(chunkLine); err != nil {
+		if entry.meta.Stream == nil {
+			entry.meta.Stream = &RecentCallUpstreamStream{}
+		}
+		entry.meta.Stream.ChunksTruncated = true
+		return
+	}
+
+	if entry.streamChunkBuf.Len() >= streamChunkBufferFlushBytes && entry.flushStreamChunkBuffer() != nil {
 		if entry.meta.Stream == nil {
 			entry.meta.Stream = &RecentCallUpstreamStream{}
 		}
@@ -474,6 +500,9 @@ func (cch *recentCallsCache) FinalizeStreamAggregatedTextByContext(c *gin.Contex
 		}
 	}
 
+	if err := entry.flushStreamChunkBuffer(); err != nil {
+		entry.meta.Stream.ChunksTruncated = true
+	}
 	_ = entry.writeTextFile(entry.streamAggPath, aggregated)
 }
 
@@ -747,6 +776,9 @@ func (cch *recentCallsCache) materializeEntry(entry *recentCallEntry) (*RecentCa
 	}
 
 	if entry.streamInited && dup.Stream != nil && entry.streamPath != "" {
+		if err := entry.flushStreamChunkBuffer(); err != nil {
+			dup.Stream.ChunksTruncated = true
+		}
 		chunks, err := readJSONLStrings(entry.streamPath, 512<<10)
 		if err == nil {
 			dup.Stream.Chunks = chunks
@@ -816,21 +848,45 @@ func (e *recentCallEntry) appendJSONLString(path string, value string) error {
 	if path == "" {
 		return nil
 	}
-	b, err := common.Marshal(value)
+	b, err := marshalJSONLStringLine(value)
 	if err != nil {
 		return err
+	}
+	return e.appendRaw(path, b)
+}
+
+func marshalJSONLStringLine(value string) ([]byte, error) {
+	b, err := common.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	b = append(b, '\n')
+	return b, nil
+}
+
+func (e *recentCallEntry) appendRaw(path string, data []byte) error {
+	if path == "" || len(data) == 0 {
+		return nil
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if _, err := f.Write(b); err != nil {
+	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(f, "\n"); err != nil {
+	return nil
+}
+
+func (e *recentCallEntry) flushStreamChunkBuffer() error {
+	if e == nil || e.streamPath == "" || e.streamChunkBuf.Len() == 0 {
+		return nil
+	}
+	if err := e.appendRaw(e.streamPath, e.streamChunkBuf.Bytes()); err != nil {
 		return err
 	}
+	e.streamChunkBuf.Reset()
 	return nil
 }
 
@@ -851,5 +907,6 @@ func (e *recentCallEntry) cleanupFiles() error {
 	e.respBodyPath = ""
 	e.streamPath = ""
 	e.streamAggPath = ""
+	e.streamChunkBuf.Reset()
 	return firstErr
 }
