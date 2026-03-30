@@ -474,3 +474,35 @@
     - 验证 stream chunk 会先留在 entry 内存缓冲
     - 验证 `FinalizeStreamAggregatedTextByContext` 会把 pending buffer 刷到 `stream_chunks.jsonl`
     - 验证刷盘后 `Get()` 仍能正确读回 chunk 与 aggregated text
+
+16. 【已实现】修复流式 SSE 渲染 panic 与 pprof 监控自杀式异常退出
+
+- 修改文件：
+  - [`common/custom-event.go`](common/custom-event.go)
+  - [`common/custom-event_test.go`](common/custom-event_test.go)
+  - [`common/pprof.go`](common/pprof.go)
+  - [`relay/helper/stream_scanner.go`](relay/helper/stream_scanner.go)
+
+- 背景：
+  - 线上容器重启时抓到堆栈落在 [`common.CustomEvent.Render`](common/custom-event.go) -> `writeData`
+  - 旧实现对 `Data` 做了 `data.(string)` 强制断言，只要流式路径传入的不是 `string`，就会直接 panic，触发进程重启
+  - 同时 [`common.Monitor`](common/pprof.go) 在 CPU 采样失败时会 `panic(err)`，这会把原本只用于诊断的 pprof 监控变成新的退出源
+  - 进一步抓到 `fatal error: concurrent map iteration and map write`，堆栈落在 `gin responseWriter.Flush()`，说明流式 flush 节流收尾时和其他写协程并发操作了同一个 HTTP response header
+
+- 实现：
+  - [`writeData`](common/custom-event.go) 改为使用 `fmt.Sprint(data)` 序列化任意类型，不再依赖字符串类型断言
+  - 保留原有 SSE 数据写入与 `data:` 前缀补 `\n\n` 的行为
+  - `writeData` 现在会把底层 writer 错误向上返回，避免静默吞错
+  - [`Monitor`](common/pprof.go) 在 CPU 采样失败时改为记录系统日志并继续下一轮，不再 panic 杀进程
+  - [`StreamScannerHandler`](relay/helper/stream_scanner.go) 的 defer 收尾顺序改为：
+    - 先发停止信号并停止 ticker
+    - 等待 ping / scanner / data handler 协程退出
+    - 最后在 `writeMutex` 保护下串行执行 `FlushPendingWriter`
+  - 这样最终 flush 不会再和并发中的 `Render/WriteHeader` 交错执行，避免触发 `net/http.Header` 的并发 map fatal
+
+- 验证：
+  - 新增 [`common/custom-event_test.go`](common/custom-event_test.go)
+  - 覆盖：
+    - 字符串 SSE payload 仍保留 `\n\n` 结束符
+    - `map[string]any` 等非字符串 payload 不再 panic
+    - `nil` payload 不再 panic

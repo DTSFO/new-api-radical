@@ -83,8 +83,6 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	// 改进资源清理，确保所有 goroutine 正确退出
 	defer func() {
-		_ = FlushPendingWriter(c)
-
 		// 通知所有 goroutine 停止
 		common.SafeSendBool(stopChan, true)
 
@@ -105,6 +103,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		case <-time.After(5 * time.Second):
 			logger.LogError(c, "timeout waiting for goroutines to exit")
 		}
+
+		writeMutex.Lock()
+		if err := FlushPendingWriter(c); err != nil {
+			logger.LogError(c, "final flush error: "+err.Error())
+		}
+		writeMutex.Unlock()
 
 		close(stopChan)
 	}()
