@@ -47,16 +47,11 @@ function formatTokens(v) {
   const sign = n0 < 0 ? '-' : '';
 
   if (!Number.isFinite(n) || n === 0) return '0';
-
-  // 统一使用科学计数法：xxxExxx（大写 E，去掉 e+ 的 + 号）
-  // 用 3 位有效数字：toExponential(2) => 1.23e+6
-  const raw = n.toExponential(2);
-  const normalized = raw
-    .replace('e+', 'E')
-    .replace('e-', 'E-')
-    .replace(/E(\d+)/, 'E$1');
-
-  return `${sign}${normalized}`;
+  if (n < 1e3) return `${sign}${Math.round(n)}`;
+  if (n < 1e6) return `${sign}${(n / 1e3).toFixed(2)}K`;
+  if (n < 1e9) return `${sign}${(n / 1e6).toFixed(2)}M`;
+  if (n < 1e12) return `${sign}${(n / 1e9).toFixed(2)}B`;
+  return `${sign}${(n / 1e12).toFixed(2)}T`;
 }
 
 function percentileNearestRank(values, p) {
