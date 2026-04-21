@@ -101,13 +101,13 @@ func UpsertModelHealthSlice5m(ctx context.Context, db *gorm.DB, event *ModelHeal
 	}
 
 	updates := map[string]any{
-		"total_requests":             gorm.Expr(fmt.Sprintf("total_requests + %s", conflictValueExpr(db, "total_requests"))),
-		"error_requests":             gorm.Expr(fmt.Sprintf("error_requests + %s", conflictValueExpr(db, "error_requests"))),
-		"success_qualified_requests": gorm.Expr(fmt.Sprintf("success_qualified_requests + %s", conflictValueExpr(db, "success_qualified_requests"))),
-		"has_success_qualified":      gorm.Expr(fmt.Sprintf("has_success_qualified OR %s", conflictValueExpr(db, "has_success_qualified"))),
-		"max_response_bytes":         gorm.Expr(fmt.Sprintf("GREATEST(max_response_bytes, %s)", conflictValueExpr(db, "max_response_bytes"))),
-		"max_completion_tokens":      gorm.Expr(fmt.Sprintf("GREATEST(max_completion_tokens, %s)", conflictValueExpr(db, "max_completion_tokens"))),
-		"max_assistant_chars":        gorm.Expr(fmt.Sprintf("GREATEST(max_assistant_chars, %s)", conflictValueExpr(db, "max_assistant_chars"))),
+		"total_requests":             gorm.Expr(fmt.Sprintf("%s + %s", targetColumnExpr(db, "total_requests"), conflictValueExpr(db, "total_requests"))),
+		"error_requests":             gorm.Expr(fmt.Sprintf("%s + %s", targetColumnExpr(db, "error_requests"), conflictValueExpr(db, "error_requests"))),
+		"success_qualified_requests": gorm.Expr(fmt.Sprintf("%s + %s", targetColumnExpr(db, "success_qualified_requests"), conflictValueExpr(db, "success_qualified_requests"))),
+		"has_success_qualified":      gorm.Expr(fmt.Sprintf("%s OR %s", targetColumnExpr(db, "has_success_qualified"), conflictValueExpr(db, "has_success_qualified"))),
+		"max_response_bytes":         gorm.Expr(fmt.Sprintf("GREATEST(%s, %s)", targetColumnExpr(db, "max_response_bytes"), conflictValueExpr(db, "max_response_bytes"))),
+		"max_completion_tokens":      gorm.Expr(fmt.Sprintf("GREATEST(%s, %s)", targetColumnExpr(db, "max_completion_tokens"), conflictValueExpr(db, "max_completion_tokens"))),
+		"max_assistant_chars":        gorm.Expr(fmt.Sprintf("GREATEST(%s, %s)", targetColumnExpr(db, "max_assistant_chars"), conflictValueExpr(db, "max_assistant_chars"))),
 	}
 
 	return db.WithContext(ctx).Clauses(clause.OnConflict{
@@ -117,6 +117,17 @@ func UpsertModelHealthSlice5m(ctx context.Context, db *gorm.DB, event *ModelHeal
 		},
 		DoUpdates: clause.Assignments(updates),
 	}).Create(row).Error
+}
+
+func targetColumnExpr(db *gorm.DB, column string) string {
+	return targetColumnExprForDialect(dbDialectName(db), column)
+}
+
+func targetColumnExprForDialect(dialectName, column string) string {
+	if dialectName == "postgres" {
+		return fmt.Sprintf("model_health_slice_5m.%s", column)
+	}
+	return column
 }
 
 func conflictValueExpr(db *gorm.DB, column string) string {
