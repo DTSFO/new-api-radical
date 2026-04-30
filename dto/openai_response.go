@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -279,7 +280,7 @@ type OpenAIResponsesResponse struct {
 	Reasoning          *Reasoning         `json:"reasoning"`
 	Store              bool               `json:"store"`
 	Temperature        float64            `json:"temperature"`
-	ToolChoice         string             `json:"tool_choice"`
+	ToolChoice         JSONString         `json:"tool_choice"`
 	Tools              []map[string]any   `json:"tools"`
 	TopP               float64            `json:"top_p"`
 	Truncation         string             `json:"truncation"`
@@ -333,6 +334,30 @@ type IncompleteDetails struct {
 	Reasoning string `json:"reasoning"`
 }
 
+type JSONString string
+
+func (s *JSONString) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*s = JSONString(text)
+		return nil
+	}
+
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*s = ""
+		return nil
+	}
+
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, trimmed); err != nil {
+		return err
+	}
+
+	*s = JSONString(compact.String())
+	return nil
+}
+
 type ResponsesOutput struct {
 	Type      string                   `json:"type"`
 	ID        string                   `json:"id"`
@@ -343,7 +368,7 @@ type ResponsesOutput struct {
 	Size      string                   `json:"size"`
 	CallId    string                   `json:"call_id,omitempty"`
 	Name      string                   `json:"name,omitempty"`
-	Arguments string                   `json:"arguments,omitempty"`
+	Arguments JSONString               `json:"arguments,omitempty"`
 }
 
 type ResponsesOutputContent struct {
